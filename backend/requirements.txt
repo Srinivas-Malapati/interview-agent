@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+pypdf
+
+# LangChain stack (tested together)
+langchain==0.1.14
+langchain-core==0.1.42
+langchain-community==0.0.27
+langchain-openai==0.0.6
+pydantic>=2
+python-dotenv

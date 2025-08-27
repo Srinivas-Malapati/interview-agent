@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HireSense Interview Pilot</title>
+    <style>
+      :root {
+        --card:#fff; --ink:#0f172a; --muted:#6b7280;
+        --brandA:#1d4ed8; --brandB:#7c3aed; --ring:#e5e7eb;
+      }
+      html,body{height:100%}
+      body{
+        margin:0;color:var(--ink);
+        background:
+          radial-gradient(1200px 600px at 10% -10%, rgba(99,102,241,.12), transparent 60%),
+          radial-gradient(1000px 600px at 90% -10%, rgba(236,72,153,.10), transparent 60%),
+          radial-gradient(1200px 800px at 50% 120%, rgba(20,184,166,.10), transparent 60%),
+          linear-gradient(180deg,#f9fafb,#ffffff);
+        background-attachment:fixed;
+      }
+      *{box-sizing:border-box}
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
