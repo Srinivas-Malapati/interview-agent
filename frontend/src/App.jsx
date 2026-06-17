@@ -24,15 +24,10 @@ const TONES = ["Professional", "Friendly", "Direct", "Supportive"];
 const FOCUS_TAGS = ["System Design", "Algorithms", "Product Sense", "Culture"];
 
 export default function App() {
-  // Public share route: /s/<token> renders a sanitized, no-auth results page.
-  // Has to run before useAuth so visitors don't get bounced to the login screen.
-  const shareToken = (() => {
-    const m = typeof window !== "undefined" && window.location.pathname.match(/^\/s\/([\w-]+)\/?$/);
-    return m ? m[1] : null;
-  })();
-  if (shareToken) {
-    return <PublicResults token={shareToken} />;
-  }
+  // Public /s/<token> route runs before useAuth so visitors aren't bounced to login.
+  const shareToken = typeof window !== "undefined"
+    && window.location.pathname.match(/^\/s\/([\w-]+)\/?$/)?.[1];
+  if (shareToken) return <PublicResults token={shareToken} />;
 
   const { user, loading: authLoading, isRequired: authRequired } = useAuth();
   const [candidateName, setCandidateName] = useState("");
@@ -345,6 +340,24 @@ export default function App() {
     analyzer.start(v);
   };
 
+  const shareSession = async () => {
+    if (!sessionId) return;
+    try {
+      const r = await authedFetch(`${API}/sessions/${sessionId}/share`, { method: "POST" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const { token } = await r.json();
+      const url = `${window.location.origin}/s/${token}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        alert(`Share link copied!\n\n${url}`);
+      } catch {
+        prompt("Copy your share link:", url);
+      }
+    } catch (e) {
+      alert(`Could not create share link: ${e?.message || e}`);
+    }
+  };
+
   const endInterview = async () => {
     if (!confirm("End the interview and see your results?")) return;
     // Kill any in-flight LLM stream + speech so no more tokens appear
@@ -644,23 +657,7 @@ export default function App() {
           <button
             className="btn btn-ghost"
             disabled={!sessionId}
-            onClick={async () => {
-              if (!sessionId) return;
-              try {
-                const r = await authedFetch(`${API}/sessions/${sessionId}/share`, { method: "POST" });
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                const { token } = await r.json();
-                const url = `${window.location.origin}/s/${token}`;
-                try {
-                  await navigator.clipboard.writeText(url);
-                  alert(`Share link copied!\n\n${url}`);
-                } catch {
-                  prompt("Copy your share link:", url);
-                }
-              } catch (e) {
-                alert(`Could not create share link: ${e?.message || e}`);
-              }
-            }}
+            onClick={shareSession}
             title="Create a public link to this session's score (no transcript, no email)"
           >
             🔗 Share

@@ -716,30 +716,28 @@ async def get_session(session_id: int, user: Dict = Depends(current_user)):
 # -----------------------------
 # Shareable public results
 # -----------------------------
-# A user can mint a public share token for any of their own sessions. The
-# token resolves a sanitized, no-PII summary at /public/results/{token} —
-# first name only, no transcript, no email. Anyone with the link can view it.
 
 def _serialize_public(s) -> Dict:
-    """Sanitized version of a session for public sharing — no transcript, no email."""
-    name = (s.candidate_name or "Candidate").strip()
-    first = name.split()[0] if name else "Candidate"
-    duration_min = 0
-    if s.started_at and s.ended_at:
-        duration_min = max(1, int((s.ended_at - s.started_at).total_seconds() / 60))
-    turns = s.turns or []
+    """Strips PII: first name only, no transcript, no email."""
+    first = (s.candidate_name or "Candidate").strip().split()[0] or "Candidate"
+    duration_min = (
+        max(1, int((s.ended_at - s.started_at).total_seconds() / 60))
+        if s.started_at and s.ended_at else 0
+    )
     scored = [
-        t for t in turns
+        t for t in (s.turns or [])
         if (t.score_structure + t.score_clarity + t.score_relevance + t.score_impact) > 0
     ]
-    avg_scores = {"structure": 0, "clarity": 0, "relevance": 0, "impact": 0}
     if scored:
+        n = len(scored)
         avg_scores = {
-            "structure": int(sum(t.score_structure for t in scored) / len(scored)),
-            "clarity":   int(sum(t.score_clarity   for t in scored) / len(scored)),
-            "relevance": int(sum(t.score_relevance for t in scored) / len(scored)),
-            "impact":    int(sum(t.score_impact    for t in scored) / len(scored)),
+            "structure": int(sum(t.score_structure for t in scored) / n),
+            "clarity":   int(sum(t.score_clarity   for t in scored) / n),
+            "relevance": int(sum(t.score_relevance for t in scored) / n),
+            "impact":    int(sum(t.score_impact    for t in scored) / n),
         }
+    else:
+        avg_scores = {"structure": 0, "clarity": 0, "relevance": 0, "impact": 0}
     return {
         "first_name": first,
         "role": s.role or "Software Engineer",
@@ -748,14 +746,13 @@ def _serialize_public(s) -> Dict:
         "overall_score": s.overall_score or 0,
         "body_language": s.body_language or {},
         "scores": avg_scores,
-        "questions_answered": sum(1 for t in turns if (t.answer or "").strip()),
+        "questions_answered": sum(1 for t in (s.turns or []) if (t.answer or "").strip()),
         "ended_at": s.ended_at.isoformat() if s.ended_at else None,
     }
 
 
 @app.post("/sessions/{session_id}/share")
 async def create_share_link(session_id: int, user: Dict = Depends(current_user)):
-    """Owner-only. Mints (or returns existing) a share token for this session."""
     with db_session() as db:
         s = crud.get_session(db, session_id)
         if not s:
@@ -770,7 +767,6 @@ async def create_share_link(session_id: int, user: Dict = Depends(current_user))
 
 @app.get("/public/results/{token}")
 async def public_results(token: str):
-    """No auth. Sanitized session summary by share token."""
     with db_session() as db:
         s = crud.get_session_by_share_token(db, token)
         if not s:
