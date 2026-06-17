@@ -40,12 +40,23 @@ export default function UnifiedProfile({ candidateName, setCandidateName, apiBas
       <div className="form-field">
         <label>Resume (PDF or text)</label>
         <div
-          className="dropzone"
+          className={`dropzone ${uploadState === "Uploaded" ? "success" : uploadState === "Error" ? "error" : ""}`}
           onDragOver={(e) => e.preventDefault()}
           onDrop={onDrop}
           onClick={() => fileRef.current?.click()}
+          style={{
+            cursor: "pointer",
+            padding: "20px",
+            border: "2px dashed var(--border-light)",
+            borderRadius: "12px",
+            textAlign: "center",
+            background: uploadState === "Uploaded" ? "rgba(16, 185, 129, 0.1)" : uploadState === "Error" ? "rgba(239, 68, 68, 0.1)" : "rgba(255, 255, 255, 0.05)",
+            transition: "all 0.2s ease"
+          }}
         >
-          Drag & drop resume here, or click to choose
+          {uploadState === "Uploaded" ? "✅ Resume uploaded successfully!" : 
+           uploadState === "Error" ? "❌ Upload failed. Click to try again." : 
+           "📄 Drag & drop resume here, or click to browse"}
         </div>
         <input
           type="file"
@@ -53,11 +64,6 @@ export default function UnifiedProfile({ candidateName, setCandidateName, apiBas
           style={{ display: "none" }}
           onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
         />
-        <div className={`hint ${uploadState === "Error" ? "error" : ""}`}>
-          {uploadState === "Idle" && "Waiting for resume…"}
-          {uploadState === "Uploaded" && "Resume uploaded ✔"}
-          {uploadState === "Error" && "Upload error: Not Found / HTTP error — check backend URL"}
-        </div>
       </div>
     </div>
   );

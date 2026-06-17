@@ -1,263 +1,224 @@
-import React, { useEffect, useRef } from "react";
-import ComposerHelpers from "./ComposerHelpers.jsx";
+import React, { useEffect, useRef, useState } from "react";
 
-/** One chat bubble, aligned by role */
-const Bubble = ({ role, text }) => {
+const API = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+const Bubble = ({ role, text, streaming }) => {
   const isAgent = role === "Agent";
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: isAgent ? "flex-start" : "flex-end",
-        margin: "12px 0",
-      }}
-    >
-      {/* Left avatar only for agent to keep visual hierarchy clean */}
-      {isAgent && (
-        <div
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: "50%",
-            marginRight: 10,
-            background:
-              "linear-gradient(135deg, rgba(219,234,254,1), rgba(167,139,250,1))",
-            display: "grid",
-            placeItems: "center",
-            fontWeight: 900,
-            color: "#0f172a",
-            flexShrink: 0,
-          }}
-          aria-label="Agent avatar"
-        >
-          A
-        </div>
-      )}
-
-      {/* Bubble */}
-      <div
-        style={{
-          maxWidth: "74%",
-          background: isAgent ? "rgba(29,78,216,.08)" : "#fff",
-          border: "1px solid #e5e7eb",
-          padding: "10px 12px",
-          borderRadius: 14,
-          borderTopLeftRadius: isAgent ? 4 : 14,
-          borderTopRightRadius: isAgent ? 14 : 4,
-          boxShadow: isAgent
-            ? "0 2px 6px rgba(29,78,216,0.06)"
-            : "0 2px 6px rgba(15,23,42,0.06)",
-        }}
-      >
-        <div
-          style={{
-            fontSize: 12,
-            color: "#6b7280",
-            marginBottom: 4,
-            textAlign: isAgent ? "left" : "right",
-          }}
-        >
-          {isAgent ? "Agent" : "You"}
-        </div>
-        <div style={{ fontSize: 14, lineHeight: 1.5, color: "#0f172a" }}>
-          {text}
-        </div>
+    <div className={`bubble ${isAgent ? "bubble-agent" : "bubble-user"}`}>
+      <div className="bubble-avatar">{isAgent ? "G" : "You"}</div>
+      <div className="bubble-content">
+        {text}
+        {streaming && (
+          <span
+            aria-hidden
+            style={{
+              display: "inline-block",
+              width: 8, height: 14, marginLeft: 4,
+              background: "currentColor", opacity: 0.65,
+              borderRadius: 1, verticalAlign: "middle",
+              animation: "blink 1s steps(2) infinite",
+            }}
+          />
+        )}
       </div>
     </div>
   );
 };
 
-/** Typing indicator for the agent */
-const Typing = () => (
-  <div style={{ display: "flex", justifyContent: "flex-start", margin: "8px 0" }}>
-    <div
-      style={{
-        width: 36,
-        height: 36,
-        borderRadius: "50%",
-        marginRight: 10,
-        background:
-          "linear-gradient(135deg, rgba(219,234,254,1), rgba(167,139,250,1))",
-        display: "grid",
-        placeItems: "center",
-        fontWeight: 900,
-        color: "#0f172a",
-        flexShrink: 0,
-      }}
-    >
-      A
-    </div>
-    <div
-      style={{
-        display: "inline-flex",
-        gap: 6,
-        alignItems: "center",
-        padding: "10px 12px",
-        borderRadius: 14,
-        background: "rgba(29,78,216,.08)",
-        border: "1px solid #e5e7eb",
-      }}
-    >
-      <Dot /> <Dot delay="150ms" /> <Dot delay="300ms" />
+const TypingIndicator = () => (
+  <div className="bubble bubble-agent">
+    <div className="bubble-avatar">G</div>
+    <div className="typing-dots">
+      <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
     </div>
   </div>
 );
 
-const Dot = ({ delay = "0ms" }) => (
-  <span
-    style={{
-      width: 6,
-      height: 6,
-      borderRadius: "50%",
-      background: "#1d4ed8",
-      display: "inline-block",
-      animation: "blink 1s infinite",
-      animationDelay: delay,
-    }}
-  />
-);
+export default function ChatWindow({ messages, onSend, pending, feedback }) {
+  const [input, setInput] = useState("");
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [notice, setNotice] = useState("");
 
-export default function ChatWindow({ title, subtitle, messages, onSend, pending }) {
-  const [input, setInput] = React.useState("");
-  const [listening, setListening] = React.useState(false);
-  const recognitionRef = React.useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const recStreamRef = useRef(null);
   const listRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const webSpeechTextRef = useRef("");
 
-  // Voice setup
-  useEffect(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
-    const rec = new SR();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-    rec.onstart = () => setListening(true);
-    rec.onend = () => setListening(false);
-    rec.onresult = (e) => {
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const transcript = e.results[i][0].transcript;
-        if (e.results[i].isFinal)
-          setInput((prev) => (prev ? prev + " " + transcript : transcript));
-      }
-    };
-    recognitionRef.current = rec;
-  }, []);
-
-  // Auto-scroll
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, pending]);
 
-  const startStopVoice = () => {
-    const rec = recognitionRef.current;
-    if (!rec) return alert("Voice input not supported here. Try Chrome/Edge.");
-    listening ? rec.stop() : rec.start();
+  const startWebSpeech = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return null;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = "en-US";
+    webSpeechTextRef.current = "";
+    let finalTranscript = "";
+    let lastInterim = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) finalTranscript += " " + t;
+        else interim += t;
+      }
+      lastInterim = interim.trim();
+      webSpeechTextRef.current = (finalTranscript + " " + lastInterim).trim();
+    };
+    rec.onerror = (e) => console.warn("SpeechRecognition error:", e.error, e);
+    rec.onend = () => {
+      if (!finalTranscript.trim() && lastInterim) webSpeechTextRef.current = lastInterim;
+    };
+    try { rec.start(); } catch (err) {
+      console.warn("SpeechRecognition start failed:", err);
+      return null;
+    }
+    return rec;
   };
+
+  const startRecording = async () => {
+    setNotice("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recStreamRef.current = stream;
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus" : "audio/webm";
+      const rec = new MediaRecorder(stream, { mimeType: mime });
+      chunksRef.current = [];
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunksRef.current.push(e.data); };
+      rec.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: mime });
+        recStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recStreamRef.current = null;
+        try { recognitionRef.current?.stop(); } catch {}
+        await new Promise((r) => setTimeout(r, 350));
+        const browserText = webSpeechTextRef.current || "";
+
+        if (blob.size < 1500) {
+          if (browserText) setInput((p) => (p ? `${p} ${browserText}` : browserText));
+          else setNotice("Too short — hold a bit longer.");
+          return;
+        }
+
+        setTranscribing(true);
+        let whisperText = "";
+        let whisperOk = false;
+        try {
+          const fd = new FormData();
+          fd.append("file", blob, "answer.webm");
+          const res = await fetch(`${API}/transcribe`, { method: "POST", body: fd });
+          const data = await res.json();
+          whisperText = (data?.text || "").trim();
+          whisperOk = !data?.error && whisperText.length > 0;
+        } catch (e) { console.warn("Whisper failed:", e); }
+
+        const finalText = whisperOk ? whisperText : browserText;
+        if (finalText) {
+          setInput((p) => (p ? `${p} ${finalText}` : finalText));
+          if (!whisperOk && browserText) setNotice("Using browser speech (Whisper unavailable).");
+        } else {
+          setNotice("Could not transcribe — try again or type instead.");
+        }
+        setTranscribing(false);
+      };
+      rec.start();
+      mediaRecorderRef.current = rec;
+      recognitionRef.current = startWebSpeech();
+      setRecording(true);
+    } catch (e) {
+      setNotice(`Mic access denied: ${e?.message}`);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+    setRecording(false);
+  };
+
+  const toggleVoice = () => (recording ? stopRecording() : startRecording());
 
   const handleSend = () => {
     const msg = input.trim();
     if (!msg || pending) return;
     onSend(msg);
     setInput("");
+    setNotice("");
   };
 
   return (
-    <div
-      style={{
-        border: "1px solid var(--ring)",
-        borderRadius: 16,
-        padding: 16,
-        minHeight: 560,
-        display: "flex",
-        flexDirection: "column",
-        background: "rgba(255,255,255,0.88)",
-        boxShadow: "0 12px 28px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.04)",
-      }}
-    >
-      <style>{`
-        @keyframes blink { 0% {opacity:.2} 50% {opacity:1} 100% {opacity:.2} }
-      `}</style>
-
-      <div style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-          <h3 style={{ fontWeight: 900, margin: 0 }}>{title || "Interview"}</h3>
-          {subtitle && (
-            <span style={{ color: "var(--muted)", fontSize: 13 }}>{subtitle}</span>
-          )}
-        </div>
+    <div className="interview-chat">
+      <div className="chat-header">
+        <h3>Live Transcript</h3>
+        <p>Tap the mic to answer — Whisper first, browser voice as backup.</p>
       </div>
 
-      <div
-        ref={listRef}
-        style={{ flex: 1, overflowY: "auto", marginBottom: 12, paddingRight: 4 }}
-      >
-        {messages.length === 0 && (
-          <div style={{ color: "#9CA3AF", fontStyle: "italic" }}>
-            Upload a resume (left) or start from JD. The agent will open with a question.
+      <div ref={listRef} className="chat-body">
+        {messages.length === 0 && !pending && (
+          <div className="chat-empty">
+            <div className="chat-empty-icon">💬</div>
+            <p>The interview will begin shortly…</p>
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <Bubble key={i} role={m.role} text={m.text} />
-        ))}
+        {messages.map((m, i) => <Bubble key={i} role={m.role} text={m.text} streaming={m.streaming} />)}
+        {pending && !messages.some((m) => m.streaming) && <TypingIndicator />}
 
-        {pending && <Typing />}
+        {feedback && messages.length > 1 && !pending && (
+          <div style={{
+            background: "var(--blue-50)", border: "1px solid var(--blue-100)",
+            borderRadius: "var(--radius-md)", padding: "10px 14px",
+            fontSize: "0.8125rem", color: "var(--blue-700)",
+            alignSelf: "flex-start", maxWidth: "90%",
+          }}>
+            <strong style={{
+              display: "block", marginBottom: 4, fontSize: "0.6875rem",
+              textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--blue-500)",
+            }}>💡 Coaching Tip</strong>
+            {feedback}
+          </div>
+        )}
+
+        {notice && (
+          <div style={{
+            fontSize: 12, padding: "6px 10px",
+            background: "rgba(122, 110, 93, 0.08)", color: "var(--gray-600)",
+            border: "1px solid rgba(122, 110, 93, 0.20)",
+            borderRadius: 8, marginTop: 4,
+          }}>{notice}</div>
+        )}
       </div>
 
-      <ComposerHelpers value={input} setValue={setInput} />
-
-      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+      <div className="chat-composer">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={listening ? "Listening… speak now" : "Type your answer…"}
+          placeholder={
+            recording ? "Recording… tap mic to finish"
+            : transcribing ? "Transcribing…"
+            : "Tap mic or type your answer"
+          }
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          style={{
-            flex: 1,
-            border: "1px solid var(--ring)",
-            borderRadius: 12,
-            padding: "12px 14px",
-            background: "#fff",
-          }}
-          disabled={pending}
+          disabled={pending || transcribing}
         />
         <button
-          onClick={startStopVoice}
-          title="Voice input"
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 999,
-            border: "0",
-            background: listening
-              ? "radial-gradient(circle at 50% 40%, #fecaca, #ef4444)"
-              : "radial-gradient(circle at 50% 40%, #e0e7ff, #1d4ed8)",
-            color: "#fff",
-            fontSize: 18,
-            boxShadow: listening
-              ? "0 0 0 6px rgba(239,68,68,0.15)"
-              : "0 0 0 6px rgba(29,78,216,0.12)",
-          }}
+          className={`composer-btn composer-mic ${recording ? "active" : ""}`}
+          onClick={toggleVoice}
+          disabled={transcribing || pending}
+          title={recording ? "Stop recording" : "Tap to record"}
         >
-          {listening ? "■" : "🎙️"}
+          {recording ? "■" : transcribing ? "…" : "🎙️"}
         </button>
-        <button
-          onClick={handleSend}
-          disabled={pending}
-          style={{
-            background: pending
-              ? "linear-gradient(90deg,#94a3b8,#cbd5e1)"
-              : "linear-gradient(90deg,#1d4ed8,#7c3aed)",
-            color: "white",
-            borderRadius: 12,
-            padding: "12px 18px",
-            border: 0,
-            fontWeight: 800,
-            opacity: pending ? 0.8 : 1,
-            cursor: pending ? "not-allowed" : "pointer",
-          }}
-        >
-          {pending ? "…" : "Send"}
+        <button className="composer-btn composer-send" onClick={handleSend} disabled={pending || !input.trim()}>
+          ➤
         </button>
       </div>
     </div>

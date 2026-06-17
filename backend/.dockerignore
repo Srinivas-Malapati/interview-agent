@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+.git/
+.env
+.env.*
+data/recordings/*.webm
+data/recordings/*.mp4
+interview_agent.db
+*.sqlite
